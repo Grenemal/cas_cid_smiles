@@ -1,0 +1,116 @@
+import requests
+from openpyxl import Workbook, load_workbook
+from pubchempy import Compound, get_cids, get_compounds
+
+
+def get_cas_from_smiles(smiles):
+    """
+    使用Cactus数据库根据SMILES获取CAS号。
+
+    Args:
+        smiles: SMILES字符串。
+
+    Returns:
+        返回对应的CAS号，如果找不到，则返回None。
+    """
+
+
+    url = "https://cactus.nci.nih.gov/chemical/structure/" + smiles + "/cas"
+    response = requests.get(url)
+    if response.status_code == 200:
+        result = response.text.__str__()
+        return result
+    else:
+        return None
+
+def process_excel(file_path, cas_column=5, cid_column=6, smiles_column=7,row_number=0):
+    """
+    处理Excel文件，根据CAS号或CID号查询并填充SMILES和CID。
+
+    Args:
+        file_path: Excel文件路径。
+        cas_column: CAS号所在列（索引从1开始）。
+        cid_column: CID号所在列（索引从1开始）。
+        smiles_column: SMILES所在列（索引从1开始）。
+    """
+
+    workbook = load_workbook(file_path)
+    sheet = workbook.active
+
+    for row in sheet.iter_rows(min_row=2):  # 从第二行开始遍历
+        row_number=row_number + 1
+        cas_cell = row[cas_column - 1]
+        cid_cell = row[cid_column - 1]
+        smiles_cell = row[smiles_column - 1]
+
+        has_cas = bool(cas_cell.value)
+        has_cid = bool(cid_cell.value)
+        has_smiles = bool(smiles_cell.value)
+
+        cas_number = smiles = cids = ""
+
+
+        if not any([has_cas, has_cid, has_smiles]):  #所有信息丢失的情况
+            print("无法获取结构信息")
+        
+        if has_cas and has_cid and has_smiles:
+            print(f"信息完全，无需更新")
+
+        if has_smiles: # 有SMILES信息
+            smiles = str(smiles_cell.value)
+            cids = get_cids(smiles, "smiles")  ## 一般不会为空值，但是有可能
+            cas_number = get_cas_from_smiles(smiles)  ##很可能为空值
+            if not has_cas:
+                if cas_number:
+                    print(f"成功找到第{row_number}行中SMILES对应的CAS")
+                    cas_cell.value = cas_number
+                else:
+                    print(f"无法找到第{row_number}中SMILES对应的CAS")
+            if not has_cid:
+                if cids:
+                    print(f"成功找到第{row_number}行中SMILES对应的CID")
+                    cid_cell.value = cids
+                else:
+                    print(f"无法找到第{row_number}中SMILES对应的CID")
+
+        if has_cas: #有CAS信息
+            cas_number = str(cas_cell.value) 
+            cids = get_cids(cas_number, "name") #先尝试通过cas信息在pubchem中找对应的cid
+            if not has_cid:
+                if cids:
+                    print(f"成功找到第{row_number}行中CAS对应的CID")
+                    cid_cell.value = cids
+                else:
+                    print(f"无法找到第{row_number}中CAS对应的CID")
+            if not has_smiles:
+                if cids:
+                    info = Compound.from_cid(cids)
+                    smiles_cell.value = info.canonical_smiles
+                    print(f"成功找到第{row_number}行中CAS对应的SMILES")
+                else:
+                    print(f"无法找到第{row_number}行中CAS对应的SMILES")
+
+        if has_cid:
+            cids = str(cid_cell.value)
+            info = Compound.from_cid(cids)
+            smiles = info.canonical_smiles
+            cas_number = get_cas_from_smiles(smiles)
+            if not has_cas:
+                if cas_number:
+                    print(f"成功找到第{row_number}行中CID对应的CAS")  
+                    cas_cell.value = cas_number
+                else:
+                    print(f"无法找到第{row_number}行中CID对应的CAS")
+            if not has_smiles:
+                smiles_cell.value = smiles
+        
+        print(F"完成第{row_number}行中分子信息的查找，CAS:{cas_cell.value}，CID:{cid_cell.value}, SMILES:{smiles_cell.value}")
+        
+
+    workbook.save(file_path)
+
+
+if __name__ == "__main__":
+    file_path = ""  # 替换为你的Excel文件路径
+    process_excel(file_path)
+
